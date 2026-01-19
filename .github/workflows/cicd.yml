@@ -41,6 +41,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install kind
+        run: |
+          if ! command -v kind &> /dev/null; then
+            echo "Installing kind..."
+            curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+            chmod +x ./kind
+            sudo mv ./kind /usr/local/bin/kind
+            kind version
+          else
+            echo "kind already installed:"
+            kind version
+          fi
+
       - name: Get short SHA
         id: sha
         run: |
@@ -51,7 +64,7 @@ jobs:
       - name: Check if kind cluster exists
         id: kind-check
         run: |
-          if kind get clusters | grep -q "^kind$"; then
+          if kind get clusters 2>/dev/null | grep -q "^kind$"; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
@@ -67,7 +80,7 @@ jobs:
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           kind load docker-image ${IMAGE_NAME}:${SHORT_SHA} --name kind
           kind load docker-image ${IMAGE_NAME}:latest --name kind
-          echo "Loaded image ${IMAGE_NAME}:${SHORT_SHA} into kind cluster"
+          echo "✅ Loaded image ${IMAGE_NAME}:${SHORT_SHA} into kind cluster"
 
       - name: Verify image in kind
         run: |
@@ -84,20 +97,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
+      - name: Install kubectl
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            echo "Installing kubectl..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/kubectl
+            kubectl version --client
+          else
+            echo "kubectl already installed:"
+            kubectl version --client
+          fi
 
       - name: Configure kubectl with KUBECONFIG
         run: |
           if [ -z "${{ secrets.KUBECONFIG }}" ]; then
-            echo "KUBECONFIG secret is not set. Please configure it in Settings -> Secrets and variables -> Actions"
-            exit 1
+            echo "⚠️ KUBECONFIG secret is not set. Trying to use kind cluster kubeconfig..."
+            # Если секрет не установлен, используем kind кластер
+            if kind get clusters 2>/dev/null | grep -q "^kind$"; then
+              mkdir -p $HOME/.kube
+              kind get kubeconfig --name kind > $HOME/.kube/config
+              chmod 600 $HOME/.kube/config
+              echo "✅ Using kind cluster kubeconfig"
+            else
+              echo "❌ KUBECONFIG secret is not set and kind cluster not found."
+              echo "Please configure KUBECONFIG in Settings -> Secrets and variables -> Actions -> Environment 'production'"
+              exit 1
+            fi
+          else
+            mkdir -p $HOME/.kube
+            echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+            chmod 600 $HOME/.kube/config
+            echo "✅ Using KUBECONFIG from secrets"
           fi
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
           kubectl config view
 
       - name: Get short SHA
