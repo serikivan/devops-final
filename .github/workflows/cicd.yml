@@ -121,35 +121,67 @@ jobs:
             echo "Installing kubectl..."
             curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
             chmod +x kubectl
-            sudo mv kubectl /usr/local/bin/kubectl
+            if sudo mv kubectl /usr/local/bin/kubectl 2>/dev/null; then
+              echo "kubectl installed to /usr/local/bin"
+            else
+              mkdir -p ~/.local/bin
+              mv kubectl ~/.local/bin/kubectl
+              echo "$HOME/.local/bin" >> $GITHUB_PATH
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
             kubectl version --client
           else
             echo "kubectl already installed:"
             kubectl version --client
           fi
 
+      - name: Install kind (if needed for kubeconfig)
+        run: |
+          if ! command -v kind &> /dev/null; then
+            echo "Installing kind for kubeconfig access..."
+            KIND_VERSION="v0.20.0"
+            curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
+            chmod +x ./kind
+            if sudo mv ./kind /usr/local/bin/kind 2>/dev/null; then
+              echo "kind installed to /usr/local/bin/kind"
+            else
+              mkdir -p ~/.local/bin
+              mv ./kind ~/.local/bin/kind
+              echo "$HOME/.local/bin" >> $GITHUB_PATH
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
+          fi
+          export PATH="$HOME/.local/bin:$PATH"
+          kind version || echo "kind not available"
+
       - name: Configure kubectl with KUBECONFIG
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           if [ -z "${{ secrets.KUBECONFIG }}" ]; then
             echo "KUBECONFIG secret is not set. Trying to use kind cluster kubeconfig..."
-            # Если секрет не установлен, используем kind кластер
-            if kind get clusters 2>/dev/null | grep -q "^kind$"; then
+            # Проверяем, что kind кластер существует и запущен
+            if command -v kind &> /dev/null && kind get clusters 2>/dev/null | grep -q "^kind$"; then
+              echo "kind cluster found, getting kubeconfig..."
               mkdir -p $HOME/.kube
               kind get kubeconfig --name kind > $HOME/.kube/config
               chmod 600 $HOME/.kube/config
               echo "Using kind cluster kubeconfig"
+              # Проверяем, что кластер доступен
+              kubectl cluster-info || echo "Warning: cluster may not be ready yet"
             else
               echo "KUBECONFIG secret is not set and kind cluster not found."
               echo "Please configure KUBECONFIG in Settings -> Secrets and variables -> Actions -> Environment 'production'"
+              echo "Or ensure kind cluster is created in the 'upload' stage"
               exit 1
             fi
           else
+            echo "Using KUBECONFIG from secrets"
             mkdir -p $HOME/.kube
             echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
             chmod 600 $HOME/.kube/config
-            echo "Using KUBECONFIG from secrets"
           fi
-          kubectl config view
+          echo "Current kubeconfig:"
+          kubectl config view --minify
 
       - name: Get short SHA
         run: |
@@ -158,7 +190,17 @@ jobs:
 
       - name: Verify cluster connection
         run: |
-          kubectl cluster-info
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "Checking cluster connection..."
+          kubectl cluster-info || {
+            echo "Error: Cannot connect to cluster"
+            echo "Checking if kind cluster is running..."
+            if command -v kind &> /dev/null; then
+              kind get clusters
+              docker ps | grep kind || echo "No kind containers running"
+            fi
+            exit 1
+          }
           kubectl get nodes
 
       - name: Deploy - Get pods
