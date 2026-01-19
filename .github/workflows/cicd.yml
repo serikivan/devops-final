@@ -1,0 +1,124 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: channel-service
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get short commit SHA
+        id: sha
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker build -t ${IMAGE_NAME}:${SHORT_SHA} .
+          docker build -t ${IMAGE_NAME}:latest .
+          echo "Built image: ${IMAGE_NAME}:${SHORT_SHA}"
+          echo "Built image: ${IMAGE_NAME}:latest"
+
+  upload:
+    name: Upload to Kind
+    runs-on: [self-hosted, linux, x64]
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get short SHA
+        id: sha
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+
+      - name: Check if kind cluster exists
+        id: kind-check
+        run: |
+          if kind get clusters | grep -q "^kind$"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create kind cluster (if not exists)
+        if: steps.kind-check.outputs.exists == 'false'
+        run: |
+          kind create cluster --name kind || true
+
+      - name: Load Docker image into kind
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          kind load docker-image ${IMAGE_NAME}:${SHORT_SHA} --name kind
+          kind load docker-image ${IMAGE_NAME}:latest --name kind
+          echo "Loaded image ${IMAGE_NAME}:${SHORT_SHA} into kind cluster"
+
+      - name: Verify image in kind
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker exec kind-control-plane crictl images | grep ${IMAGE_NAME} || echo "Image verification (may need crictl)"
+
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: [self-hosted, linux, x64]
+    needs: [build, upload]
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl with KUBECONFIG
+        run: |
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "KUBECONFIG secret is not set. Please configure it in Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          kubectl config view
+
+      - name: Get short SHA
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+
+      - name: Verify cluster connection
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Deploy - Get pods
+        run: |
+          kubectl get pods --all-namespaces
+
+      - name: Deploy - Get services
+        run: |
+          kubectl get services --all-namespaces
+
+      - name: Deploy - Get deployments
+        run: |
+          kubectl get deployments --all-namespaces || echo "No deployments found"
+

@@ -1,12 +1,59 @@
 # Канальный уровень 
-### Репозиторий канального уровня в рамках курсовой работы по дисципине
+### Репозиторий для АРЭ ПО на основе проекта канального уровня в рамках курсовой работы по дисципине
 ### [Сетевые технологии (Networking)](https://github.com/iu5git/Networking/tree/main)
-### Серик Иван РТ5-61
+### Серик Иван РТ5-71
 ## Инструкция по развёртыванию
+
 ### 1. Клонирование репозитория: 
-```git clone https://github.com/serikivan/channel_layer```
+```bash
+git clone https://github.com/serikivan/devops-final
+cd devops-final
+```
+
 ### 2. Развёртывание контейнера:
-```docker compose up --build```
+
+#### С помощью Docker Compose (рекомендуется):
+```bash
+docker compose up --build
+```
+
+#### Или в фоновом режиме:
+```bash
+docker compose up -d --build
+```
+
+#### Остановка контейнера:
+```bash
+docker compose down
+```
+
+### 3. Сборка и запуск Docker образа вручную:
+
+#### Сборка образа:
+```bash
+docker build -t channel-service:latest .
+```
+
+#### Запуск контейнера:
+```bash
+docker run -d \
+  --name channel_service \
+  -p 5000:5000 \
+  -e TEST_MODE=true \
+  -e DEBUG=False \
+  channel-service:latest
+```
+
+#### Просмотр логов:
+```bash
+docker logs -f channel_service
+```
+
+#### Остановка и удаление:
+```bash
+docker stop channel_service
+docker rm channel_service
+```
 
 ## Тестовый режим (без транспортного уровня)
 Проект **запускается в тестовом режиме по умолчанию**.

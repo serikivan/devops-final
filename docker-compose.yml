@@ -2,12 +2,27 @@ version: '3.8'
 
 services:
   channel_service:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: channel-service:latest
+    container_name: channel_service
     ports:
-      - "5000:5000"  # Пробрасываем порт 8000 из контейнера на хост
+      - "5000:5000"  # Пробрасываем порт 5000 из контейнера на хост
     environment:
-      - DEBUG=False  # Пример переменной окружения
+      - DEBUG=False
       # Тестовый режим: работаем без внешних серверов транспортного уровня
       - TEST_MODE=true
+      - PYTHONUNBUFFERED=1
     volumes:
-      - .:/appCL  # Для разработки: синхронизация кода
+      # Для разработки: синхронизация кода (закомментируй для продакшена)
+      - .:/appCL
+      # Для продакшена используй только для данных:
+      # - ./data:/appCL/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/swagger/').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
