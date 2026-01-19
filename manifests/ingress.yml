@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: channel-service-ingress
+  namespace: default
+  labels:
+    app: channel-service
+    component: backend
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Для kind кластера может потребоваться ingress-nginx controller
+    # kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: channel-service.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: channel-service
+            port:
+              number: 5000
+  # Альтернативный вариант без host (для kind)
+  # rules:
+  # - http:
+  #     paths:
+  #     - path: /
+  #       pathType: Prefix
+  #       backend:
+  #         service:
+  #           name: channel-service
+  #           port:
+  #             number: 5000
+
